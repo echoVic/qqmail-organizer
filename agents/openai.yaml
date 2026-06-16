@@ -1,4 +1,4 @@
 interface:
   display_name: "QQMail Organizer"
-  short_description: "Safely organize QQ Mail inboxes"
-  default_prompt: "Use $qqmail-organizer to classify my QQ Mail inbox and propose safe cleanup actions."
+  short_description: "Agent-safe QQ Mail inbox triage"
+  default_prompt: "Use $qqmail-organizer to triage my QQ Mail inbox with a read-only plan and dry-run cleanup proposal."
