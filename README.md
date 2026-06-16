@@ -102,8 +102,60 @@ a private policy file. Pass that private policy explicitly:
 
 ```bash
 python3 scripts/qqmail.py validate-rules --rules rules.local.json --json
-python3 scripts/qqmail.py auto-organize --rules rules.local.json --limit 100
+python3 scripts/qqmail.py auto-organize --rules rules.local.json --limit 100 --json
 ```
+
+### Private Policy Example
+
+When a user asks for a mailbox policy, generate a private rules file outside the
+public skill repo. For example, if the user says:
+
+> Archive GitHub notifications to the GitHub folder. Keep marketing mail in
+> review; do not delete it.
+
+An agent can write a private file such as `rules.local.json`:
+
+```json
+{
+  "version": 1,
+  "rules": [
+    {
+      "name": "GitHub notifications",
+      "category": "github",
+      "from_contains": "notifications@github.com",
+      "action": "archive",
+      "target": "GitHub"
+    },
+    {
+      "name": "Marketing review",
+      "category": "marketing",
+      "match_category": "marketing",
+      "action": "review"
+    }
+  ]
+}
+```
+
+Validate first:
+
+```bash
+python3 scripts/qqmail.py validate-rules --rules rules.local.json --json
+```
+
+Preview without changing the mailbox:
+
+```bash
+python3 scripts/qqmail.py auto-organize --rules rules.local.json --limit 100 --json
+```
+
+Apply only after the user confirms the exact action set:
+
+```bash
+python3 scripts/qqmail.py auto-organize --rules rules.local.json --limit 100 --apply --json
+```
+
+Keep private policy files out of public commits when they encode a user's
+mailbox preferences.
 
 ## Agent Safety Rules
 

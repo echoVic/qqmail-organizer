@@ -117,8 +117,11 @@ For personalized cleanup, write a private rules file outside the public skill re
 
 ```bash
 python3 scripts/qqmail.py validate-rules --rules /path/to/rules.json --json
-python3 scripts/qqmail.py auto-organize --rules /path/to/rules.json --limit 100
+python3 scripts/qqmail.py auto-organize --rules /path/to/rules.json --limit 100 --json
+python3 scripts/qqmail.py auto-organize --rules /path/to/rules.json --limit 100 --apply --json
 ```
+
+Only run the `--apply` command after the user approves the exact action set from the dry-run JSON.
 
 ## Safety Policy For Agent Runtimes
 
