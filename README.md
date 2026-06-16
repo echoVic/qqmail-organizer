@@ -72,6 +72,18 @@ password. Never commit it to git.
 
 ## OpenClaw Market
 
+Published on ClawHub:
+
+```bash
+clawhub install qqmail-organizer
+```
+
+Skill page:
+
+```text
+https://clawhub.ai/echovic/qqmail-organizer
+```
+
 Publish the skill directory with ClawHub:
 
 ```bash
@@ -87,6 +99,23 @@ Authentication is required before publishing:
 ```bash
 clawhub login --token "$CLAWHUB_TOKEN" --no-browser
 ```
+
+## skills.sh
+
+The skill is indexed on skills.sh from this public GitHub repository:
+
+```text
+https://www.skills.sh/echovic/qqmail-organizer/qqmail-organizer
+```
+
+Install with the official `skills` CLI:
+
+```bash
+npx skills add echoVic/qqmail-organizer --skill qqmail-organizer
+```
+
+The CLI discovers the publishable skill at `skills/qqmail-organizer/` and
+installs it into the selected agent's skill directory.
 
 ## Agent Workflow
 
