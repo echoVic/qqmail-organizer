@@ -5,8 +5,8 @@ QQ Mail Manager - IMAP/SMTP client for QQ邮箱
 Usage:
     python3 qqmail.py inbox [--limit N] [--folder FOLDER]
     python3 qqmail.py read --index N [--folder FOLDER]
-    python3 qqmail.py send --to ADDR --subject SUBJ --body BODY [--attachment PATH]
-    python3 qqmail.py reply --index N --body BODY [--folder FOLDER]
+    python3 qqmail.py send --to ADDR --subject SUBJ --body BODY [--attachment PATH] [--dry-run]
+    python3 qqmail.py reply --index N --body BODY [--folder FOLDER] [--dry-run]
     python3 qqmail.py search [--subject KW] [--from ADDR] [--since DATE] [--limit N]
     python3 qqmail.py folders
 
@@ -24,7 +24,6 @@ import imaplib
 import io
 import json
 import os
-import re
 import smtplib
 import ssl
 import sys
@@ -48,6 +47,7 @@ SMTP_PORT = 465
 PREVIEW_MAX_CHARS = 200
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_RULES_FILE = os.path.join(BASE_DIR, "rules.example.json")
+VALID_RULE_ACTIONS = {"archive", "mark-read", "mark-unread", "review"}
 
 
 def contains_non_ascii(value):
@@ -104,6 +104,16 @@ def get_credentials():
         print("  mail.qq.com → 设置 → 账户 → IMAP/SMTP服务 → 生成授权码")
         sys.exit(1)
     return user, auth_code
+
+
+def get_mail_user(required=True):
+    """Read the mailbox user without requiring an SMTP/IMAP auth code."""
+    user = os.environ.get("QQMAIL_USER", "").strip()
+    if not user and required:
+        print("ERROR: QQMAIL_USER environment variable not set.")
+        print("Set it to your QQ email address, e.g.: export QQMAIL_USER=123456789@qq.com")
+        sys.exit(1)
+    return user or "(QQMAIL_USER not set)"
 
 
 def decode_header_value(raw):
@@ -255,12 +265,78 @@ def load_rules(path=None):
         print(f"ERROR: Failed to read rules file {path}: {e}")
         sys.exit(1)
     if isinstance(data, list):
+        validate_rules(data, path)
         return {"rules": data}
     if not isinstance(data, dict):
         print(f"ERROR: Rules file must contain a JSON object or list: {path}")
         sys.exit(1)
     data.setdefault("rules", [])
+    validate_rules(data["rules"], path)
     return data
+
+
+def validate_rules(rules, path):
+    if not isinstance(rules, list):
+        print(f"ERROR: rules must be a list in {path}")
+        sys.exit(1)
+    for i, rule in enumerate(rules, 1):
+        if not isinstance(rule, dict):
+            print(f"ERROR: rule #{i} must be an object in {path}")
+            sys.exit(1)
+        action = rule.get("action", "review")
+        if action not in VALID_RULE_ACTIONS:
+            print(f"ERROR: rule #{i} has unsupported action {action!r}. Use one of {sorted(VALID_RULE_ACTIONS)}.")
+            sys.exit(1)
+        if action == "archive" and not rule.get("target"):
+            print(f"ERROR: archive rule #{i} must define target.")
+            sys.exit(1)
+        has_matcher = any(
+            key in rule
+            for key in (
+                "from",
+                "from_contains",
+                "any_from_contains",
+                "subject",
+                "subject_contains",
+                "any_subject_contains",
+                "match_category",
+            )
+        )
+        if not has_matcher:
+            print(f"ERROR: rule #{i} has no matcher.")
+            sys.exit(1)
+
+
+def json_safe_item(item):
+    return {
+        key: value
+        for key, value in item.items()
+        if key != "msg_id"
+    }
+
+
+def emit_json(payload):
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def text_preview(value, limit=160):
+    value = " ".join((value or "").split())
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3] + "..."
+
+
+def grouped_for_json(grouped, *, preview_limit):
+    groups = []
+    for (action, target), items in sorted(grouped.items(), key=lambda kv: (kv[0][0] or "", kv[0][1] or "")):
+        groups.append({
+            "action": action,
+            "target": target,
+            "count": len(items),
+            "items": [json_safe_item(item) for item in items[:preview_limit]],
+            "truncated": max(0, len(items) - preview_limit),
+        })
+    return groups
 
 
 def rule_matches(rule, summary):
@@ -318,14 +394,16 @@ def mailbox_exists(conn, name):
     return False
 
 
-def ensure_mailbox(conn, name):
+def ensure_mailbox(conn, name, *, quiet=False):
     if mailbox_exists(conn, name):
         return True
     status, data = conn.create(mailbox_quote(name))
     if status == "OK":
-        print(f"Created folder: {name}")
+        if not quiet:
+            print(f"Created folder: {name}")
         return True
-    print(f'ERROR: Target folder "{name}" does not exist and could not be created: {data}')
+    if not quiet:
+        print(f'ERROR: Target folder "{name}" does not exist and could not be created: {data}')
     return False
 
 
@@ -533,21 +611,34 @@ def cmd_read(args):
 
 def cmd_send(args):
     """Send an email via SMTP."""
-    user, auth_code = get_credentials()
-
+    user = get_mail_user(required=not args.dry_run)
     to_addr = args.to
     subject = args.subject
     body = args.body
     attachment_path = args.attachment
 
+    if attachment_path and not os.path.isfile(attachment_path):
+        print(f"ERROR: Attachment file not found: {attachment_path}")
+        sys.exit(1)
+
+    if args.dry_run:
+        attachment = os.path.basename(attachment_path) if attachment_path else None
+        print("[DRY RUN] Would send email")
+        print(f"  From: {user}")
+        print(f"  To: {to_addr}")
+        print(f"  Subject: {subject}")
+        print(f"  Body preview: {text_preview(body)}")
+        if attachment:
+            print(f"  Attachment: {attachment}")
+        print("No message was sent.")
+        return
+
+    _, auth_code = get_credentials()
+
     # Build message
     if attachment_path:
         msg = MIMEMultipart()
         msg.attach(MIMEText(body, "plain", "utf-8"))
-
-        if not os.path.isfile(attachment_path):
-            print(f"ERROR: Attachment file not found: {attachment_path}")
-            sys.exit(1)
 
         filename = os.path.basename(attachment_path)
         with open(attachment_path, "rb") as f:
@@ -585,7 +676,7 @@ def cmd_send(args):
 
 def cmd_reply(args):
     """Reply to a specific email by index (1-based, newest-first)."""
-    user, auth_code = get_credentials()
+    user = get_mail_user(required=True)
     folder = args.folder or "INBOX"
     index = args.index
 
@@ -641,6 +732,18 @@ def cmd_reply(args):
         msg["In-Reply-To"] = message_id
         msg["References"] = f"{references} {message_id}".strip() if references else message_id
 
+    if args.dry_run:
+        print("[DRY RUN] Would send reply")
+        print(f"  From: {user}")
+        print(f"  To: {reply_to}")
+        print(f"  Subject: {subject}")
+        print(f"  Body preview: {text_preview(args.body)}")
+        print(f"  In-Reply-To: {'yes' if message_id else 'no'}")
+        print(f"  References: {'yes' if references or message_id else 'no'}")
+        print("No reply was sent.")
+        return
+
+    _, auth_code = get_credentials()
     try:
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, context=context) as server:
@@ -771,6 +874,11 @@ def cmd_delete(args):
             preview_msg_ids(conn, msg_ids)
             return
 
+        if args.confirm_delete != "DELETE":
+            print('ERROR: Refusing permanent delete without --confirm-delete DELETE.')
+            print("Run with --dry-run first, then repeat with --confirm-delete DELETE only after explicit approval.")
+            return
+
         conn.select(folder)
         for mid in msg_ids:
             conn.store(mid, "+FLAGS", "\\Deleted")
@@ -869,12 +977,38 @@ def cmd_plan_organize(args):
         conn.logout()
 
     if not classified:
+        if args.json:
+            emit_json({
+                "mode": "plan",
+                "mutated": False,
+                "folder": folder,
+                "count": 0,
+                "categories": {},
+            })
+            return
         print("No emails found for organization planning.")
         return
 
     buckets = {}
     for item in classified:
         buckets.setdefault(item["category"], []).append(item)
+
+    if args.json:
+        emit_json({
+            "mode": "plan",
+            "mutated": False,
+            "folder": folder,
+            "count": len(classified),
+            "categories": {
+                category: {
+                    "count": len(items),
+                    "items": [json_safe_item(item) for item in items[: args.per_category]],
+                    "truncated": max(0, len(items) - args.per_category),
+                }
+                for category, items in sorted(buckets.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+            },
+        })
+        return
 
     print(f"Organization plan for {folder}: {len(classified)} email(s)")
     print("=" * 70)
@@ -917,16 +1051,38 @@ def cmd_auto_organize(args):
             if item.get("rule") and item.get("action") in {"archive", "mark-read", "mark-unread"}
         ]
         if not actionable:
+            if args.json:
+                emit_json({
+                    "mode": "apply" if apply_changes else "dry-run",
+                    "mutated": False,
+                    "folder": folder,
+                    "evaluated_count": len(classified),
+                    "actionable_count": 0,
+                    "groups": [],
+                })
+                return
             print("No rule-matched emails to organize.")
             return
 
-        print(f"{'[APPLY]' if apply_changes else '[DRY RUN]'} {len(actionable)} rule-matched email(s)")
         grouped = {}
         for item in actionable:
             key = (item.get("action"), item.get("target"))
             grouped.setdefault(key, []).append(item)
 
         if not apply_changes:
+            if args.json:
+                emit_json({
+                    "mode": "dry-run",
+                    "mutated": False,
+                    "folder": folder,
+                    "evaluated_count": len(classified),
+                    "actionable_count": len(actionable),
+                    "groups": grouped_for_json(grouped, preview_limit=args.preview_limit),
+                    "apply_hint": "Re-run the same command with --apply after explicit user approval.",
+                })
+                return
+
+            print(f"[DRY RUN] {len(actionable)} rule-matched email(s)")
             for (action, target), items in grouped.items():
                 label = f"{action}:{target}" if target else action
                 print(f"\n## {label} ({len(items)})")
@@ -939,12 +1095,16 @@ def cmd_auto_organize(args):
 
         conn.select(folder)
         should_expunge = False
+        skipped = []
         for (action, target), items in grouped.items():
             if action == "archive":
                 if not target:
-                    print("SKIP: archive rule missing target")
+                    skipped.append({"action": action, "reason": "archive rule missing target", "count": len(items)})
+                    if not args.json:
+                        print("SKIP: archive rule missing target")
                     continue
-                if not ensure_mailbox(conn, target):
+                if not ensure_mailbox(conn, target, quiet=args.json):
+                    skipped.append({"action": action, "target": target, "reason": "target folder unavailable", "count": len(items)})
                     continue
                 conn.select(folder)
                 for item in items:
@@ -961,6 +1121,18 @@ def cmd_auto_organize(args):
 
         if should_expunge:
             conn.expunge()
+        if args.json:
+            emit_json({
+                "mode": "apply",
+                "mutated": moved > 0 or marked > 0,
+                "folder": folder,
+                "evaluated_count": len(classified),
+                "actionable_count": len(actionable),
+                "moved": moved,
+                "marked": marked,
+                "skipped": skipped,
+            })
+            return
         print(f"OK: moved {moved} email(s), marked {marked} email(s)")
     finally:
         conn.logout()
@@ -1071,12 +1243,14 @@ def main():
     p_send.add_argument("--subject", required=True, help="Email subject")
     p_send.add_argument("--body", required=True, help="Email body text")
     p_send.add_argument("--attachment", help="Path to attachment file")
+    p_send.add_argument("--dry-run", action="store_true", help="Preview without sending")
 
     # reply
     p_reply = subparsers.add_parser("reply", help="Reply to a specific email")
     p_reply.add_argument("--index", type=int, required=True, help="Email index (1=newest)")
     p_reply.add_argument("--folder", type=str, default="INBOX", help="Mail folder (default: INBOX)")
     p_reply.add_argument("--body", required=True, help="Reply body text")
+    p_reply.add_argument("--dry-run", action="store_true", help="Preview without sending")
 
     # search
     p_search = subparsers.add_parser("search", help="Search emails")
@@ -1112,6 +1286,7 @@ def main():
     p_delete.add_argument("--since", help="Delete emails since date (YYYY-MM-DD)")
     p_delete.add_argument("--unread", action="store_true", help="Only delete unread emails")
     p_delete.add_argument("--dry-run", action="store_true", help="Preview without deleting emails")
+    p_delete.add_argument("--confirm-delete", help='Required phrase for permanent deletion: DELETE')
     p_delete.add_argument("--folder", type=str, default="INBOX", help="Source folder (default: INBOX)")
 
     # mark-read / mark-unread
@@ -1136,6 +1311,7 @@ def main():
     p_plan.add_argument("--since", help="Only classify emails since date (YYYY-MM-DD)")
     p_plan.add_argument("--rules", default=DEFAULT_RULES_FILE, help=f"Rules JSON path (default: {DEFAULT_RULES_FILE})")
     p_plan.add_argument("--per-category", type=int, default=8, help="Max emails shown per category (default: 8)")
+    p_plan.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     # auto-organize
     p_auto = subparsers.add_parser("auto-organize", help="Apply organization rules; dry-run by default")
@@ -1146,6 +1322,7 @@ def main():
     p_auto.add_argument("--rules", default=DEFAULT_RULES_FILE, help=f"Rules JSON path (default: {DEFAULT_RULES_FILE})")
     p_auto.add_argument("--preview-limit", type=int, default=20, help="Max preview rows per action (default: 20)")
     p_auto.add_argument("--apply", action="store_true", help="Actually apply archive/mark rules")
+    p_auto.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     args = parser.parse_args()
 

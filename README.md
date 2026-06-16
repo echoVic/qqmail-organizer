@@ -12,6 +12,10 @@ Default behavior is conservative:
 - Planning is read-only.
 - Rule-based organization is dry-run by default.
 - Mutations require explicit commands.
+- `plan-organize --json` and `auto-organize --json` provide machine-readable
+  output for parent agents.
+- `send --dry-run` and `reply --dry-run` preview externally visible messages.
+- Permanent deletion requires `--confirm-delete DELETE`.
 - External sends/replies and permanent deletion require explicit user intent.
 - Credentials are read from environment variables and must never be logged,
   committed, or copied into prompts.
@@ -21,18 +25,19 @@ Default behavior is conservative:
 Agents should use this repository as a controlled mailbox operation layer:
 
 1. Start ambiguous cleanup or triage requests with `plan-organize`.
-2. Preview rule-based cleanup with `auto-organize` without `--apply`.
-3. Apply only after the user confirms the proposed action set.
-4. Report summaries and counts, not full mailbox dumps.
-5. Ask before permanent delete or auto-reply policies.
-6. Never reveal `QQMAIL_AUTH_CODE`.
+2. Use `--json` when another agent will parse the result.
+3. Preview rule-based cleanup with `auto-organize` without `--apply`.
+4. Apply only after the user confirms the proposed action set.
+5. Report summaries and counts, not full mailbox dumps.
+6. Ask before permanent delete or auto-reply policies.
+7. Never reveal `QQMAIL_AUTH_CODE`.
 
 ## Features
 
 - Read recent QQ Mail messages.
 - Read a message by newest-first index.
 - Search by sender, subject, date, unread state, and folder.
-- Send and reply to email through QQ Mail SMTP.
+- Preview, send, and reply to email through QQ Mail SMTP.
 - Classify recent mail into categories such as GitHub, recruiting, security,
   finance, newsletter, marketing, and review.
 - Preview rule-based cleanup before changing anything.
@@ -62,14 +67,28 @@ password. Never commit it to git.
 ```bash
 python3 scripts/qqmail.py folders
 python3 scripts/qqmail.py inbox --limit 20
-python3 scripts/qqmail.py plan-organize --limit 50
-python3 scripts/qqmail.py auto-organize --limit 100
+python3 scripts/qqmail.py plan-organize --limit 50 --json
+python3 scripts/qqmail.py auto-organize --limit 100 --json
 ```
 
 `auto-organize` is dry-run by default. Apply only after explicit confirmation:
 
 ```bash
 python3 scripts/qqmail.py auto-organize --limit 100 --apply
+```
+
+Preview sends and replies before externally visible actions:
+
+```bash
+python3 scripts/qqmail.py send --to user@example.com --subject "Hello" --body "Message" --dry-run
+python3 scripts/qqmail.py reply --index 1 --body "Reply text" --dry-run
+```
+
+Permanent deletion requires both a selector and an exact confirmation phrase:
+
+```bash
+python3 scripts/qqmail.py delete --index 1 --dry-run
+python3 scripts/qqmail.py delete --index 1 --confirm-delete DELETE
 ```
 
 ## Rules
@@ -88,7 +107,10 @@ python3 scripts/qqmail.py auto-organize --rules rules.local.json --limit 100
 
 - Run `plan-organize` first.
 - Run archive/delete/mark commands with `--dry-run` before applying.
+- Run send/reply commands with `--dry-run` before sending unless exact content
+  has already been approved.
 - Do not run `delete` unless permanent deletion is intended.
+- Do not run permanent deletion without `--confirm-delete DELETE`.
 - Do not create automatic reply or delete cron jobs without explicit
   confirmation.
 - Do not commit credentials, inbox exports, or personal rule files.
