@@ -46,7 +46,8 @@ SMTP_PORT = 465
 # Max chars for email preview in inbox listing
 PREVIEW_MAX_CHARS = 200
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_RULES_FILE = os.path.join(BASE_DIR, "rules.example.json")
+DEFAULT_RULES_FILE = os.path.join(BASE_DIR, "rules.agent.json")
+RULES_SCHEMA_FILE = os.path.join(BASE_DIR, "rules.schema.json")
 VALID_RULE_ACTIONS = {"archive", "mark-read", "mark-unread", "review"}
 
 
@@ -257,7 +258,8 @@ def default_category_for(summary):
 def load_rules(path=None):
     path = path or DEFAULT_RULES_FILE
     if not os.path.exists(path):
-        return {"rules": []}
+        print(f"ERROR: Rules file not found: {path}")
+        sys.exit(1)
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -305,6 +307,26 @@ def validate_rules(rules, path):
         if not has_matcher:
             print(f"ERROR: rule #{i} has no matcher.")
             sys.exit(1)
+
+
+def summarize_rules(rules):
+    actions = {}
+    categories = {}
+    targets = {}
+    for rule in rules:
+        action = rule.get("action", "review")
+        category = rule.get("category") or "(none)"
+        target = rule.get("target") or "(none)"
+        actions[action] = actions.get(action, 0) + 1
+        categories[category] = categories.get(category, 0) + 1
+        if action == "archive":
+            targets[target] = targets.get(target, 0) + 1
+    return {
+        "count": len(rules),
+        "actions": actions,
+        "categories": categories,
+        "archive_targets": targets,
+    }
 
 
 def json_safe_item(item):
@@ -944,6 +966,32 @@ def cmd_mark_unread(args):
     cmd_mark(args, False)
 
 
+def cmd_validate_rules(args):
+    """Validate an organization rules file without connecting to QQ Mail."""
+    rules_path = args.rules or DEFAULT_RULES_FILE
+    data = load_rules(rules_path)
+    summary = summarize_rules(data.get("rules", []))
+    if args.json:
+        emit_json({
+            "valid": True,
+            "rules_file": rules_path,
+            "schema_file": RULES_SCHEMA_FILE,
+            **summary,
+        })
+        return
+
+    print(f"OK: Rules file is valid: {rules_path}")
+    print(f"Rules: {summary['count']}")
+    if summary["actions"]:
+        print("Actions:")
+        for action, count in sorted(summary["actions"].items()):
+            print(f"  {action}: {count}")
+    if summary["archive_targets"]:
+        print("Archive targets:")
+        for target, count in sorted(summary["archive_targets"].items()):
+            print(f"  {target}: {count}")
+
+
 def collect_classified_messages(conn, *, folder, limit, unread=False, since=None, rules_file=None):
     rules = load_rules(rules_file).get("rules", [])
     msg_ids = list_message_ids(conn, folder, readonly=True, unread=unread, since=since)
@@ -1303,6 +1351,11 @@ def main():
         p_mark.add_argument("--dry-run", action="store_true", help="Preview without changing flags")
         p_mark.add_argument("--folder", type=str, default="INBOX", help="Source folder (default: INBOX)")
 
+    # validate-rules
+    p_validate_rules = subparsers.add_parser("validate-rules", help="Validate organization rules without connecting to QQ Mail")
+    p_validate_rules.add_argument("--rules", default=DEFAULT_RULES_FILE, help=f"Rules JSON path (default: {DEFAULT_RULES_FILE})")
+    p_validate_rules.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     # plan-organize
     p_plan = subparsers.add_parser("plan-organize", help="Classify emails and print an organization plan without changes")
     p_plan.add_argument("--limit", type=int, default=50, help="Number of recent emails to classify (default: 50)")
@@ -1342,6 +1395,7 @@ def main():
         "delete": cmd_delete,
         "mark-read": cmd_mark_read,
         "mark-unread": cmd_mark_unread,
+        "validate-rules": cmd_validate_rules,
         "plan-organize": cmd_plan_organize,
         "auto-organize": cmd_auto_organize,
     }

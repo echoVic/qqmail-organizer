@@ -102,7 +102,9 @@ python3 scripts/qqmail.py delete --index 1 --confirm-delete DELETE
 
 ## Rules
 
-Rule-based organization uses `rules.example.json` by default. Treat this file as a sample policy, not a user's private rule state. Agents should prefer an explicit `--rules /path/to/rules.json` when operating a user's customized mailbox policy.
+Rule-based organization uses `rules.agent.json` by default. This default policy intentionally contains no rules, so packaged skill behavior never archives, marks, or moves mail based on public sample preferences. Agents should generate or select an explicit `--rules /path/to/rules.json` only after the user has approved the mailbox policy.
+
+Use `rules.schema.json` as the machine-readable contract for generated policy files. The script also validates rules before planning or applying them.
 
 Rules support matching by sender, subject, or inferred category, and actions such as:
 
@@ -111,9 +113,10 @@ Rules support matching by sender, subject, or inferred category, and actions suc
 - `mark-unread`: remove the `Seen` flag.
 - `review`: classify only, do not mutate.
 
-For personalized cleanup, copy `rules.example.json` to another path and call:
+For personalized cleanup, write a private rules file outside the public skill repo and call:
 
 ```bash
+python3 scripts/qqmail.py validate-rules --rules /path/to/rules.json --json
 python3 scripts/qqmail.py auto-organize --rules /path/to/rules.json --limit 100
 ```
 

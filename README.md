@@ -93,13 +93,15 @@ python3 scripts/qqmail.py delete --index 1 --confirm-delete DELETE
 
 ## Rules
 
-The default sample rules live in `rules.example.json`. Treat them as example
-policy, not as a user's private production policy.
+The default policy lives in `rules.agent.json`. It intentionally contains no
+rules, so a packaged copy of this skill never archives, marks, or moves mail
+based on public sample preferences.
 
-For personalized rules, copy the example file and pass it explicitly:
+Use `rules.schema.json` as the machine-readable contract when an agent generates
+a private policy file. Pass that private policy explicitly:
 
 ```bash
-cp rules.example.json rules.local.json
+python3 scripts/qqmail.py validate-rules --rules rules.local.json --json
 python3 scripts/qqmail.py auto-organize --rules rules.local.json --limit 100
 ```
 
