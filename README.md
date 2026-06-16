@@ -7,6 +7,14 @@ It is not primarily a human email client. The skill provides deterministic
 scripts and an agent operation protocol for reading, searching, replying to,
 classifying, and safely organizing QQ Mail inboxes.
 
+The publishable OpenClaw skill lives in `skills/qqmail-organizer/`. Commands
+below assume the current working directory is that skill root after installation
+or after running:
+
+```bash
+cd skills/qqmail-organizer
+```
+
 Default behavior is conservative:
 
 - Planning is read-only.
@@ -61,6 +69,24 @@ export QQMAIL_AUTH_CODE='your-qqmail-authorization-code'
 
 `QQMAIL_AUTH_CODE` is the QQ Mail IMAP/SMTP authorization code, not your QQ
 password. Never commit it to git.
+
+## OpenClaw Market
+
+Publish the skill directory with ClawHub:
+
+```bash
+clawhub publish "$(pwd)/skills/qqmail-organizer" \
+  --slug qqmail-organizer \
+  --name "QQMail Organizer" \
+  --version 0.1.0 \
+  --tags qqmail,email,imap,smtp,agent
+```
+
+Authentication is required before publishing:
+
+```bash
+clawhub login --token "$CLAWHUB_TOKEN" --no-browser
+```
 
 ## Agent Workflow
 
