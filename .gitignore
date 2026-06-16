@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.env
+rules.local.json
+*.log
+.DS_Store
